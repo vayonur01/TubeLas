@@ -13,7 +13,8 @@ button { background:#4f46e5; color:white; border:none; padding:10px 20px; border
 button:hover { background:#3730a3; }
 input { padding:10px; font-size:16px; border-radius:6px; border:1px solid #ccc; width:100%; margin:5px 0; }
 #player { margin:20px auto; }
-p { font-size:16px; }
+#videoList { margin-top:20px; text-align:left; }
+#videoList li { margin:5px 0; background:#e0e7ff; padding:8px; border-radius:5px; }
 </style>
 </head>
 <body>
@@ -37,12 +38,15 @@ p { font-size:16px; }
   <div id="player"></div>
   <p>İzleme Süresi: <span id="timer">0</span> / <span id="goal">0</span> saniye</p>
   <button id="nextBtn">Sonraki Video</button>
+
+  <h3>Yüklenen Videolar</h3>
+  <ul id="videoList"></ul>
 </div>
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.2/firebase-app.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/9.22.2/firebase-auth.js";
-import { getDatabase, ref, get, set, push, child } from "https://www.gstatic.com/firebasejs/9.22.2/firebase-database.js";
+import { getDatabase, ref, get, set, push } from "https://www.gstatic.com/firebasejs/9.22.2/firebase-database.js";
 
 // Firebase Config
 const firebaseConfig = {
@@ -69,6 +73,8 @@ let interval;
 let goalTime = 10; // default yeni kullanıcı
 let isFirstVideoAdded = false;
 
+const videoListElem = document.getElementById("videoList");
+
 document.getElementById("loginBtn").addEventListener("click", async () => {
   const provider = new GoogleAuthProvider();
   try { await signInWithPopup(auth, provider); }
@@ -81,7 +87,8 @@ onAuthStateChanged(auth, async user => {
     document.getElementById("auth").style.display = "none";
     document.getElementById("main").style.display = "block";
     await loadPoints();
-    await loadUserVideos();
+    await loadAllVideos();
+    renderVideoList();
   }
 });
 
@@ -92,13 +99,26 @@ async function loadPoints(){
   else { await set(pointsRef, 0); document.getElementById("points").innerText = 0; }
 }
 
-// Videoları yükle
-async function loadUserVideos(){
+async function loadAllVideos(){
   const videosRef = ref(db, "videos");
   const snapshot = await get(videosRef);
   if(snapshot.exists()){
     videos = Object.values(snapshot.val());
+    if(videos.length > 0){
+      goalTime = videos[0].goal;
+      document.getElementById("goal").innerText = goalTime;
+      loadVideo(videos[0].id);
+    }
   }
+}
+
+function renderVideoList(){
+  videoListElem.innerHTML = "";
+  videos.forEach((v, idx) => {
+    const li = document.createElement("li");
+    li.innerText = `Video ${idx+1} - İzleme Süresi: ${v.goal}s - Ekleyen: ${v.user}`;
+    videoListElem.appendChild(li);
+  });
 }
 
 // Video ekleme
@@ -109,21 +129,20 @@ document.getElementById("addVideoBtn").addEventListener("click", async ()=>{
   const videoId = url.split("v=")[1]?.split("&")[0];
   if(!videoId){ alert("Geçerli YouTube URL girin."); return; }
 
-  // İlk defa siteye gelen ve puanı olmayan kullanıcı -> sadece 1 video, süre 10
   const pointsSnapshot = await get(ref(db,"users/" + currentUser.uid + "/points"));
   const points = pointsSnapshot.exists() ? pointsSnapshot.val() : 0;
   if(points===0 && isFirstVideoAdded){ alert("Yeni kullanıcı yalnızca 1 video ekleyebilir."); return; }
-
-  if(points===0){ seconds = 10; isFirstVideoAdded = true; } // yeni kullanıcı 10 saniye
-
+  if(points===0){ seconds = 10; isFirstVideoAdded = true; } 
   if(seconds < 10) seconds=10;
   if(seconds > 60) seconds=60;
 
-  await push(ref(db,"videos"), {user: currentUser.uid, id: videoId, goal:seconds});
+  const newVideoRef = await push(ref(db,"videos"), {user: currentUser.uid, id: videoId, goal:seconds});
   videos.push({user: currentUser.uid, id: videoId, goal:seconds});
   goalTime = seconds;
   document.getElementById("goal").innerText = goalTime;
-  loadVideo(videoId);
+  renderVideoList();
+
+  if(videos.length===1) loadVideo(videoId); // ilk video eklendiğinde oynat
   document.getElementById("videoUrl").value="";
   document.getElementById("watchSeconds").value="";
 });
