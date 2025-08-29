@@ -6,13 +6,14 @@
 <title>YouTube Viewer Game</title>
 <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
 <style>
-  body { font-family: 'Roboto', sans-serif; background: #f5f7fa; margin:0; padding:0; text-align:center; }
-  header { background:#4f46e5; color:white; padding:20px; font-size:1.5em; font-weight:bold; }
-  #auth, #main { margin:20px auto; max-width:700px; background:white; padding:20px; border-radius:10px; box-shadow:0 4px 10px rgba(0,0,0,0.1);}
-  button { background:#4f46e5; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-size:16px; margin:5px;}
-  button:hover { background:#3730a3; }
-  input, select { padding:10px; font-size:16px; border-radius:6px; border:1px solid #ccc; width:100%; margin:5px 0; }
-  #player { margin:20px auto; }
+body { font-family: 'Roboto', sans-serif; background: #f0f2f5; margin:0; padding:0; text-align:center; }
+header { background:#4f46e5; color:white; padding:20px; font-size:1.5em; font-weight:bold; }
+#auth, #main { margin:20px auto; max-width:700px; background:white; padding:20px; border-radius:10px; box-shadow:0 4px 10px rgba(0,0,0,0.1);}
+button { background:#4f46e5; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-size:16px; margin:5px;}
+button:hover { background:#3730a3; }
+input { padding:10px; font-size:16px; border-radius:6px; border:1px solid #ccc; width:100%; margin:5px 0; }
+#player { margin:20px auto; }
+p { font-size:16px; }
 </style>
 </head>
 <body>
@@ -26,10 +27,10 @@
 <div id="main" style="display:none;">
   <p>Puanın: <span id="points">0</span></p>
 
-  <div>
+  <div id="addVideoDiv">
     <h3>Video Ekle</h3>
     <input type="text" id="videoUrl" placeholder="YouTube video URL'si">
-    <input type="number" id="watchSeconds" placeholder="Kaç saniye izleyeceksin? (10-60)" min="10" max="60">
+    <input type="number" id="watchSeconds" placeholder="Kaç saniye izleyeceksin? (Yeni kullanıcı: 10)" min="10" max="60">
     <button id="addVideoBtn">Videoyu Ekle</button>
   </div>
 
@@ -41,7 +42,7 @@
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.2/firebase-app.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/9.22.2/firebase-auth.js";
-import { getDatabase, ref, get, set, push } from "https://www.gstatic.com/firebasejs/9.22.2/firebase-database.js";
+import { getDatabase, ref, get, set, push, child } from "https://www.gstatic.com/firebasejs/9.22.2/firebase-database.js";
 
 // Firebase Config
 const firebaseConfig = {
@@ -65,7 +66,8 @@ let currentVideoIndex = 0;
 let player;
 let watchTime = 0;
 let interval;
-let goalTime = 0;
+let goalTime = 10; // default yeni kullanıcı
+let isFirstVideoAdded = false;
 
 document.getElementById("loginBtn").addEventListener("click", async () => {
   const provider = new GoogleAuthProvider();
@@ -73,13 +75,13 @@ document.getElementById("loginBtn").addEventListener("click", async () => {
   catch(e){ alert("Giriş başarısız: " + e.message); }
 });
 
-onAuthStateChanged(auth, user => {
+onAuthStateChanged(auth, async user => {
   if(user){
     currentUser = user;
     document.getElementById("auth").style.display = "none";
     document.getElementById("main").style.display = "block";
-    loadPoints();
-    loadUserVideos();
+    await loadPoints();
+    await loadUserVideos();
   }
 });
 
@@ -90,22 +92,40 @@ async function loadPoints(){
   else { await set(pointsRef, 0); document.getElementById("points").innerText = 0; }
 }
 
+// Videoları yükle
+async function loadUserVideos(){
+  const videosRef = ref(db, "videos");
+  const snapshot = await get(videosRef);
+  if(snapshot.exists()){
+    videos = Object.values(snapshot.val());
+  }
+}
+
 // Video ekleme
 document.getElementById("addVideoBtn").addEventListener("click", async ()=>{
   const url = document.getElementById("videoUrl").value;
   let seconds = parseInt(document.getElementById("watchSeconds").value);
-  if(!url || isNaN(seconds) || seconds < 10 || seconds > 60){ alert("Geçerli URL ve saniye giriniz (10-60)"); return; }
+  if(!url){ alert("URL giriniz"); return; }
   const videoId = url.split("v=")[1]?.split("&")[0];
-  if(!videoId){ alert("Geçerli bir YouTube URL girin."); return; }
+  if(!videoId){ alert("Geçerli YouTube URL girin."); return; }
 
-  // Sadece bir video hakkı
-  if(videos.length > 0){ alert("Sadece bir video ekleyebilirsin."); return; }
+  // İlk defa siteye gelen ve puanı olmayan kullanıcı -> sadece 1 video, süre 10
+  const pointsSnapshot = await get(ref(db,"users/" + currentUser.uid + "/points"));
+  const points = pointsSnapshot.exists() ? pointsSnapshot.val() : 0;
+  if(points===0 && isFirstVideoAdded){ alert("Yeni kullanıcı yalnızca 1 video ekleyebilir."); return; }
 
-  videos.push({id:videoId, goal:seconds});
-  await push(ref(db, "videos"), {user:currentUser.uid, id:videoId, goal:seconds});
+  if(points===0){ seconds = 10; isFirstVideoAdded = true; } // yeni kullanıcı 10 saniye
+
+  if(seconds < 10) seconds=10;
+  if(seconds > 60) seconds=60;
+
+  await push(ref(db,"videos"), {user: currentUser.uid, id: videoId, goal:seconds});
+  videos.push({user: currentUser.uid, id: videoId, goal:seconds});
   goalTime = seconds;
   document.getElementById("goal").innerText = goalTime;
   loadVideo(videoId);
+  document.getElementById("videoUrl").value="";
+  document.getElementById("watchSeconds").value="";
 });
 
 // YouTube Player
@@ -145,14 +165,14 @@ function onPlayerStateChange(event){
 
 async function addPoints(){
   let pointsElem = document.getElementById("points");
-  let currentPoints = parseInt(pointsElem.innerText) + goalTime; // puan = izleme süresi
+  let currentPoints = parseInt(pointsElem.innerText) + goalTime;
   pointsElem.innerText = currentPoints;
   await set(ref(db,"users/" + currentUser.uid + "/points"), currentPoints);
   watchTime = 0;
   document.getElementById("timer").innerText = watchTime;
 }
 
-// Sonraki video
+// Sıradaki video
 document.getElementById("nextBtn").addEventListener("click", ()=>{
   if(videos.length === 0) return;
   currentVideoIndex = (currentVideoIndex + 1) % videos.length;
