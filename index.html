@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>YouTube Viewer Game</title>
+<style>
+  body { font-family: Arial, sans-serif; text-align: center; }
+  #player { margin: 20px auto; }
+  button { padding: 10px 20px; font-size: 16px; }
+</style>
+</head>
+<body>
+
+<h1>YouTube Viewer Game</h1>
+
+<div id="auth">
+  <button id="loginBtn">Google ile Giriş Yap</button>
+</div>
+
+<div id="main" style="display:none;">
+  <p>Puanın: <span id="points">0</span></p>
+  <div id="player"></div>
+  <p>İzleme Süresi: <span id="timer">0</span> / 60 saniye</p>
+  <button id="nextBtn">Sonraki Video</button>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.2/firebase-app.js";
+import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/9.22.2/firebase-auth.js";
+import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/9.22.2/firebase-database.js";
+
+// Firebase Config
+const firebaseConfig = {
+  apiKey: "AIzaSyBxzPtapNfFbmhRXKGlpQWK9VoN3_c35Jw",
+  authDomain: "canli-144bb.firebaseapp.com",
+  databaseURL: "https://canli-144bb-default-rtdb.firebaseio.com",
+  projectId: "canli-144bb",
+  storageBucket: "canli-144bb.appspot.com",
+  messagingSenderId: "457370004106",
+  appId: "1:457370004106:web:52976555bdd1ed8ae69b73",
+  measurementId: "G-7J3M88CL85"
+};
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getDatabase(app);
+
+let currentUser = null;
+let currentVideoIndex = 0;
+const videos = ["VIDEO_ID_1","VIDEO_ID_2","VIDEO_ID_3"]; // YouTube Video ID’leri
+let player;
+let watchTime = 0;
+let interval;
+
+document.getElementById("loginBtn").addEventListener("click", async () => {
+  const provider = new GoogleAuthProvider();
+  try { await signInWithPopup(auth, provider); }
+  catch(e){ alert("Giriş başarısız: " + e.message); }
+});
+
+onAuthStateChanged(auth, user => {
+  if(user){
+    currentUser = user;
+    document.getElementById("auth").style.display = "none";
+    document.getElementById("main").style.display = "block";
+    loadPoints();
+    loadVideo(videos[currentVideoIndex]);
+  }
+});
+
+async function loadPoints(){
+  const pointsRef = ref(db, "users/" + currentUser.uid + "/points");
+  const snapshot = await get(pointsRef);
+  if(snapshot.exists()){ document.getElementById("points").innerText = snapshot.val(); }
+  else { await set(pointsRef, 0); document.getElementById("points").innerText = 0; }
+}
+
+// YouTube Player API ready
+function onYouTubeIframeAPIReady() {
+  player = new YT.Player('player', {
+    height: '360',
+    width: '640',
+    videoId: videos[currentVideoIndex],
+    events: {
+      'onStateChange': onPlayerStateChange
+    }
+  });
+}
+
+function loadVideo(videoId){
+  if(player){
+    player.loadVideoById(videoId);
+  } else {
+    // Player hazır değilse iframe API otomatik çağıracak
+  }
+}
+
+// İzleme süresi ve puan kontrolü
+function onPlayerStateChange(event){
+  if(event.data === YT.PlayerState.PLAYING){
+    interval = setInterval(()=>{
+      watchTime++;
+      document.getElementById("timer").innerText = watchTime;
+      if(watchTime >= 60){
+        clearInterval(interval);
+        addPoints();
+        player.stopVideo();
+      }
+    },1000);
+  } else {
+    clearInterval(interval); // duraklatılırsa süre durur
+  }
+}
+
+async function addPoints(){
+  let pointsElem = document.getElementById("points");
+  let currentPoints = parseInt(pointsElem.innerText) + 10;
+  pointsElem.innerText = currentPoints;
+  await set(ref(db,"users/" + currentUser.uid + "/points"), currentPoints);
+  watchTime = 0;
+  document.getElementById("timer").innerText = watchTime;
+}
+
+// Sonraki video
+document.getElementById("nextBtn").addEventListener("click", ()=>{
+  currentVideoIndex = (currentVideoIndex + 1) % videos.length;
+  loadVideo(videos[currentVideoIndex]);
+  watchTime = 0;
+  document.getElementById("timer").innerText = watchTime;
+});
+
+</script>
+<script src="https://www.youtube.com/iframe_api"></script>
+</body>
+</html>
